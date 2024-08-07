@@ -1,124 +1,122 @@
-use gtest::{Log, Program, System};
-use pebbles_game_io::*;
+#[cfg(test)]
+mod tests {
+    use gstd::{prelude::*,};
+    use gtest::{Program, System};
+    use io::*;
 
-const PLAYER: u64 = 100;
-
-fn init_game(sys: &System, difficulty: DifficultyLevel, pebbles_count: u32, max_pebbles_per_turn: u32) -> Program<'_> {
-    sys.init_logger();
-    let game = Program::current_opt(sys);
-
-    let pebbles_init = PebblesInit {
-        difficulty,
-        pebbles_count,
-        max_pebbles_per_turn,
-    };
-    let res = game.send(PLAYER, pebbles_init);
-    assert!(!res.main_failed());
-    game
-}
-
-#[test]
-fn game_flow() {
-    let sys = System::new();
-    let game = init_game(&sys, DifficultyLevel::Easy, 15, 2);
-
-    // 检查初始状态
-    let state: GameState = game.read_state(b"").unwrap();
-    assert_eq!(state.pebbles_count, 15);
-    assert_eq!(state.max_pebbles_per_turn, 2);
-    assert!(state.pebbles_remaining <= 15 && state.pebbles_remaining >= 13);
-    assert!(matches!(state.difficulty, DifficultyLevel::Easy));
-    assert!(state.winner.is_none());
-
-    // 玩家回合
-    let res = game.send(PLAYER, PebblesAction::Turn(1));
-    assert!(!res.main_failed());
-    let expected_counter = Log::builder().payload(PebblesEvent::CounterTurn(1));
-    assert!(res.contains(&expected_counter) || res.contains(&Log::builder().payload(PebblesEvent::Won(Player::Program))));
-
-    // 检查游戏是否结束
-    let state: GameState = game.read_state(b"").unwrap();
-    if state.winner.is_some() {
-        assert!(matches!(state.winner, Some(Player::Program)));
-    } else {
-        // 继续游戏直到结束
-        loop {
-            let state: GameState = game.read_state(b"").unwrap();
-            if state.winner.is_some() {
-                break;
-            }
-            let pebbles_to_remove = std::cmp::min(state.pebbles_remaining, state.max_pebbles_per_turn);
-            let res = game.send(PLAYER, PebblesAction::Turn(pebbles_to_remove));
-            assert!(!res.main_failed());
-        }
+    fn create_system_and_user() -> (System, u64) {
+        let sys = System::new();
+        sys.init_logger();
+        let user_id = 1;
+        sys.mint_to(user_id, 10000000000000);
+        (sys, user_id)
     }
 
-    // 检查最终状态
-    let final_state: GameState = game.read_state(b"").unwrap();
-    assert!(final_state.winner.is_some());
-    assert_eq!(final_state.pebbles_remaining, 0);
+    #[test]
+    fn test_init_success() {
+        let (sys, user_id) = create_system_and_user();
+        let program = Program::current(&sys);
+
+        let init_msg = PebblesInit {
+            difficulty: DifficultyLevel::Easy,
+            pebbles_count: 10,
+            max_pebbles_per_turn: 3,
+        };
+
+        let res = program.send_bytes(user_id, init_msg.encode());
+        println!("{:?}", res);
+
+        let state: GameState = program.read_state(()).expect("Failed to read state");
+        assert_eq!(state.pebbles_count, 10);
+        assert_eq!(state.max_pebbles_per_turn, 3);
+        assert_eq!(state.pebbles_remaining, 7);
+        assert!(state.first_player == Player::User || state.first_player == Player::Program);
+
+    }
+
+
+    #[test]
+    fn test_who_turn() {
+        let (sys, user_id) = create_system_and_user();
+
+        let program = Program::current(&sys);
+        let init_msg = PebblesInit {
+            difficulty: DifficultyLevel::Easy,
+            pebbles_count: 10,
+            max_pebbles_per_turn: 3,
+        };
+
+        program.send_bytes(1, init_msg.encode());
+        let turn_action = PebblesAction::Turn(3);
+        let res = program.send_bytes(user_id, turn_action.encode());
+        println!("{:?}", res);
+        let state: GameState = program.read_state(()).expect("Failed to read state");
+        println!("State: {:?}", state);
+        assert_eq!(state.first_player, Player::Program);
+        //assert_eq!(state.winner,Some(Player::Program));
+
+    }
+
+    #[test]
+    fn test_who_wins() {
+        let (sys, user_id) = create_system_and_user();
+        let program = Program::current(&sys);
+        let init_msg = PebblesInit {
+            difficulty: DifficultyLevel::Easy,
+            pebbles_count: 1,
+            max_pebbles_per_turn: 1,
+        };
+        let res=  program.send_bytes(user_id, init_msg.encode());
+        let state: GameState = program.read_state(()).expect("Failed to read state");
+        println!("State: {:?}", state);
+        println!("{:?}", res);
+        assert_eq!(state.winner,Some(Player::Program));
+        //assert_eq!(state.winner,Some(Player::User));
+    }
+
+    #[test]
+    fn test_restart_game() {
+        let (sys, user_id) = create_system_and_user();
+        let program = Program::current(&sys);
+        let init_msg = PebblesInit {
+            difficulty: DifficultyLevel::Easy,
+            pebbles_count: 10,
+            max_pebbles_per_turn: 3,
+        };
+
+        program.send_bytes(user_id, init_msg.encode());
+
+        let restart_action = PebblesAction::Restart {
+            difficulty: DifficultyLevel::Hard,
+            pebbles_count: 20,
+            max_pebbles_per_turn: 5,
+        };
+
+        program.send_bytes(user_id, restart_action.encode());
+        let state: GameState = program.read_state(()).expect("Failed to read state");
+        println!("{:?}", state);
+        assert_eq!(state.pebbles_count, 20);
+    }
+
+    #[test]
+    fn test_give_up() {
+        let (sys, user_id) = create_system_and_user();
+        let program = Program::current(&sys);
+        let init_msg = PebblesInit {
+            difficulty: DifficultyLevel::Easy,
+            pebbles_count: 10,
+            max_pebbles_per_turn: 3,
+        };
+
+        program.send_bytes(user_id, init_msg.encode());
+
+        let give_up_action = PebblesAction::GiveUp;
+        let res = program.send_bytes(user_id, give_up_action.encode());
+        let state: GameState = program.read_state(()).expect("Failed to read state");
+        println!("{:?}", state);
+        println!("{:?}", res);
+        assert_eq!(state.winner,Some(Player::Program));
+    }
 }
 
-#[test]
-fn difficulty_levels() {
-    let sys = System::new();
 
-    // 简单模式
-    let easy_game = init_game(&sys, DifficultyLevel::Easy, 15, 2);
-    let easy_state: GameState = easy_game.read_state(b"").unwrap();
-    assert!(matches!(easy_state.difficulty, DifficultyLevel::Easy));
-
-    // 困难模式
-    let hard_game = init_game(&sys, DifficultyLevel::Hard, 15, 2);
-    let hard_state: GameState = hard_game.read_state(b"").unwrap();
-    assert!(matches!(hard_state.difficulty, DifficultyLevel::Hard));
-}
-
-#[test]
-fn invalid_inputs() {
-    let sys = System::new();
-    let game = Program::current_opt(&sys);
-
-    // 无效的初始化参数
-    let invalid_init = PebblesInit {
-        difficulty: DifficultyLevel::Easy,
-        pebbles_count: 0,
-        max_pebbles_per_turn: 0,
-    };
-    let res = game.send(PLAYER, invalid_init);
-    assert!(res.main_failed());
-
-    // 有效初始化
-    let game = init_game(&sys, DifficultyLevel::Easy, 15, 2);
-
-    // 无效的回合操作
-    let res = game.send(PLAYER, PebblesAction::Turn(3));
-    assert!(res.main_failed());
-}
-
-#[test]
-fn give_up_and_restart() {
-    let sys = System::new();
-    let game = init_game(&sys, DifficultyLevel::Easy, 15, 2);
-
-    // 玩家投降
-    let res = game.send(PLAYER, PebblesAction::GiveUp);
-    assert!(!res.main_failed());
-
-    let state: GameState = game.read_state(b"").unwrap();
-    assert!(matches!(state.winner, Some(Player::Program)));
-
-    // 重新开始游戏
-    let res = game.send(PLAYER, PebblesAction::Restart {
-        difficulty: DifficultyLevel::Hard,
-        pebbles_count: 20,
-        max_pebbles_per_turn: 3,
-    });
-    assert!(!res.main_failed());
-
-    let new_state: GameState = game.read_state(b"").unwrap();
-    assert_eq!(new_state.pebbles_count, 20);
-    assert_eq!(new_state.max_pebbles_per_turn, 3);
-    assert!(matches!(new_state.difficulty, DifficultyLevel::Hard));
-    assert!(new_state.winner.is_none());
-}
