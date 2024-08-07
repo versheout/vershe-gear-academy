@@ -7,10 +7,10 @@ pub struct PebblesMetadata;
 impl Metadata for PebblesMetadata {
     type Init = In<PebblesInit>;
     type Handle = InOut<PebblesAction, PebblesEvent>;
-    type State = Out<GameState>;
     type Reply = ();
     type Others = ();
     type Signal = ();
+    type State = Out<GameState>;
 }
 
 #[derive(Debug, Default, Clone, Encode, Decode, TypeInfo)]
