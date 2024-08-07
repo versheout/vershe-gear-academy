@@ -4,13 +4,6 @@ mod tests {
     use gtest::{Program, System};
     use io::*;
 
-    fn create_system_and_user() -> (System, u64) {
-        let sys = System::new();
-        sys.init_logger();
-        let user_id = 1;
-        sys.mint_to(user_id, 10000000000000);
-        (sys, user_id)
-    }
 
     #[test]
     fn test_init_success() {
@@ -119,5 +112,11 @@ mod tests {
     }
 }
 
-
+    fn create_system_and_user() -> (System, u64) {
+        let sys = System::new();
+        sys.init_logger();
+        let user_id = 1;
+        sys.mint_to(user_id, 10000000000000);
+        (sys, user_id)
+    }
 
